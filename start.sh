@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ============================================
-# Stock Pattern Scanner - One Command Startup
+# 10X Stock Scanner - One Command Startup
 # ============================================
 # Usage: ./start.sh          - Start all services
 #        ./start.sh stop     - Stop all services
@@ -22,11 +22,23 @@ NC='\033[0m'
 mkdir -p "$LOG_DIR" "$PID_DIR"
 
 check_port() {
-    lsof -Pi ":$1" -sTCP:LISTEN -t >/dev/null 2>&1
+    if command -v lsof &>/dev/null; then
+        lsof -Pi ":$1" -sTCP:LISTEN -t >/dev/null 2>&1
+    elif command -v ss &>/dev/null; then
+        ss -tlnp | grep -q ":$1 "
+    elif command -v netstat &>/dev/null; then
+        netstat -tlnp 2>/dev/null | grep -q ":$1 "
+    else
+        curl -s "http://localhost:$1" >/dev/null 2>&1
+    fi
 }
 
 kill_port() {
-    local pid=$(lsof -ti :"$1" 2>/dev/null)
+    if command -v lsof &>/dev/null; then
+        local pid=$(lsof -ti :"$1" 2>/dev/null)
+    else
+        local pid=$(ss -tlnp | grep ":$1 " | grep -oP 'pid=\K[0-9]+' 2>/dev/null | head -1)
+    fi
     if [ -n "$pid" ]; then
         echo -e "${YELLOW}Killing process on port $1 (PID: $pid)${NC}"
         kill "$pid" 2>/dev/null
@@ -52,10 +64,28 @@ if [ "$1" = "restart" ]; then
     sleep 2
 fi
 
-echo -e "${BLUE}============================================${NC}"
-echo -e "${BLUE}   Stock Pattern Scanner - CVNA Edition${NC}"
-echo -e "${BLUE}============================================${NC}"
+echo -e "${BLUE}==========================================${NC}"
+echo -e "${BLUE}   10X Stock Scanner${NC}"
+echo -e "${BLUE}==========================================${NC}"
 echo ""
+
+# Auto-setup if venv missing
+if [ ! -d "$BACKEND_DIR/venv" ]; then
+    echo -e "${YELLOW}First run - setting up Python backend...${NC}"
+    cd "$BACKEND_DIR"
+    python3 -m venv venv
+    source venv/bin/activate
+    pip install -q -r requirements.txt
+    echo -e "${GREEN}Backend setup complete.${NC}"
+fi
+
+# Auto-setup if node_modules missing
+if [ ! -d "$FRONTEND_DIR/node_modules" ]; then
+    echo -e "${YELLOW}First run - setting up frontend...${NC}"
+    cd "$FRONTEND_DIR"
+    npm install --silent
+    echo -e "${GREEN}Frontend setup complete.${NC}"
+fi
 
 # Start backend
 if check_port 8001; then
@@ -67,7 +97,6 @@ else
     setsid python -m uvicorn main:app --host 0.0.0.0 --port 8001 > "$LOG_DIR/backend.log" 2>&1 &
     echo $! > "$PID_DIR/backend.pid"
     
-    # Wait for backend
     for i in {1..30}; do
         if check_port 8001; then
             echo -e "${GREEN}Backend started successfully${NC}"
@@ -90,7 +119,6 @@ else
     setsid npm run dev > "$LOG_DIR/frontend.log" 2>&1 &
     echo $! > "$PID_DIR/frontend.pid"
     
-    # Wait for frontend
     for i in {1..30}; do
         if check_port 3000; then
             echo -e "${GREEN}Frontend started successfully${NC}"
@@ -105,9 +133,9 @@ else
 fi
 
 echo ""
-echo -e "${GREEN}============================================${NC}"
+echo -e "${GREEN}==========================================${NC}"
 echo -e "${GREEN}   All services running!${NC}"
-echo -e "${GREEN}============================================${NC}"
+echo -e "${GREEN}==========================================${NC}"
 echo ""
 echo -e "  ${BLUE}Frontend:${NC} http://localhost:3000"
 echo -e "  ${BLUE}Backend:${NC}  http://localhost:8001"
